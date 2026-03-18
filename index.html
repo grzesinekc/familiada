@@ -1,0 +1,292 @@
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Mic, MicOff, Users, Trophy, X, RotateCcw, Play, SkipForward } from 'lucide-react';
+
+// Przykładowe pytania i odpowiedzi
+const QUESTIONS_DATABASE = [
+  {
+    question: "Więcej niż jeden to...",
+    answers: [
+      { text: "Dwa", points: 35 },
+      { text: "Grupa", points: 28 },
+      { text: "Tłum", points: 15 },
+      { text: "Kilka", points: 12 },
+      { text: "Mnóstwo", points: 10 }
+    ]
+  },
+  {
+    question: "Co można znaleźć w lesie?",
+    answers: [
+      { text: "Grzyby", points: 42 },
+      { text: "Drzewa", points: 30 },
+      { text: "Zwierzęta", points: 18 },
+      { text: "Jagody", points: 7 },
+      { text: "Mech", points: 3 }
+    ]
+  },
+  {
+    question: "Jaki przedmiot szkolny jest najtrudniejszy?",
+    answers: [
+      { text: "Matematyka", points: 51 },
+      { text: "Fizyka", points: 22 },
+      { text: "Chemia", points: 14 },
+      { text: "Historia", points: 8 },
+      { text: "Biologia", points: 5 }
+    ]
+  }
+];
+
+const App = () => {
+  // Stan gry
+  const [currentRound, setCurrentRound] = useState(0);
+  const [revealedAnswers, setRevealedAnswers] = useState([]);
+  const [strikes, setStrikes] = useState(0);
+  const [bank, setBank] = useState(0);
+  const [activeTeam, setActiveTeam] = useState(0); // 0 lub 1
+  const [teamScores, setTeamScores] = useState([0, 0]);
+  const [isListening, setIsListening] = useState(false);
+  const [statusMessage, setStatusMessage] = useState("Witaj w Familiadzie!");
+  const [gameOver, setGameOver] = useState(false);
+
+  // Inicjalizacja rozpoznawania mowy
+  const recognitionRef = useRef(null);
+
+  useEffect(() => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (SpeechRecognition) {
+      recognitionRef.current = new SpeechRecognition();
+      recognitionRef.current.lang = 'pl-PL';
+      recognitionRef.current.continuous = false;
+      recognitionRef.current.interimResults = false;
+
+      recognitionRef.current.onresult = (event) => {
+        const transcript = event.results[0][0].transcript.toLowerCase().trim();
+        handleAnswer(transcript);
+        setIsListening(false);
+      };
+
+      recognitionRef.current.onerror = () => {
+        setIsListening(false);
+        setStatusMessage("Błąd mikrofonu. Spróbuj ponownie.");
+      };
+
+      recognitionRef.current.onend = () => {
+        setIsListening(false);
+      };
+    }
+  }, [currentRound, revealedAnswers, strikes, activeTeam]);
+
+  const toggleListening = () => {
+    if (isListening) {
+      recognitionRef.current?.stop();
+    } else {
+      setStatusMessage("Słucham...");
+      setIsListening(true);
+      recognitionRef.current?.start();
+    }
+  };
+
+  const handleAnswer = (text) => {
+    const currentQ = QUESTIONS_DATABASE[currentRound];
+    const foundIndex = currentQ.answers.findIndex(
+      a => a.text.toLowerCase() === text || text.includes(a.text.toLowerCase())
+    );
+
+    if (foundIndex !== -1 && !revealedAnswers.includes(foundIndex)) {
+      // Dobra odpowiedź
+      const points = currentQ.answers[foundIndex].points;
+      setRevealedAnswers(prev => [...prev, foundIndex]);
+      setBank(prev => prev + points);
+      setStatusMessage(`Dobrze! ${currentQ.answers[foundIndex].text} za ${points} pkt.`);
+      
+      // Sprawdź czy koniec rundy (wszystkie odkryte)
+      if (revealedAnswers.length + 1 === currentQ.answers.length) {
+        finalizeRound(activeTeam);
+      }
+    } else {
+      // Zła odpowiedź
+      const newStrikes = strikes + 1;
+      setStrikes(newStrikes);
+      setStatusMessage(`Niestety, nie ma takiej odpowiedzi! (Strata: ${newStrikes})`);
+      
+      if (newStrikes >= 3) {
+        // Próba przejęcia przez drugą drużynę
+        setActiveTeam(activeTeam === 0 ? 1 : 0);
+        setStatusMessage("Szansa dla drugiej drużyny na przejęcie banku!");
+        if (strikes >= 3) {
+             // W logice Familiady po 3 błędach następuje jedna szansa dla rywali.
+             // Tu upraszczamy: po 3 błędach punkty idą do przeciwnika jeśli on odpowie, 
+             // ale w tej wersji po prostu kończymy rundę po błędzie przejęcia.
+        }
+      }
+    }
+  };
+
+  const finalizeRound = (winningTeamIndex) => {
+    const newScores = [...teamScores];
+    newScores[winningTeamIndex] += bank;
+    setTeamScores(newScores);
+    setBank(0);
+    setStrikes(0);
+    setRevealedAnswers([]);
+    
+    if (currentRound + 1 < QUESTIONS_DATABASE.length) {
+      setCurrentRound(prev => prev + 1);
+      setStatusMessage(`Runda ${currentRound + 2}!`);
+    } else {
+      setGameOver(true);
+      setStatusMessage("Koniec gry! Gratulacje!");
+    }
+  };
+
+  const resetGame = () => {
+    setCurrentRound(0);
+    setRevealedAnswers([]);
+    setStrikes(0);
+    setBank(0);
+    setTeamScores([0, 0]);
+    setGameOver(false);
+    setStatusMessage("Nowa gra rozpoczęta!");
+  };
+
+  const currentQuestion = QUESTIONS_DATABASE[currentRound];
+
+  return (
+    <div className="min-h-screen bg-slate-900 text-white font-sans p-4 md:p-8 flex flex-col items-center">
+      {/* Header */}
+      <div className="w-full max-w-5xl flex justify-between items-center mb-8 bg-slate-800 p-6 rounded-2xl shadow-xl border border-slate-700">
+        <div className="flex items-center gap-4">
+          <div className={`p-4 rounded-xl ${activeTeam === 0 ? 'bg-yellow-500 text-slate-900 shadow-[0_0_15px_rgba(234,179,8,0.5)]' : 'bg-slate-700'}`}>
+            <h2 className="text-sm font-bold uppercase tracking-widest">Drużyna A</h2>
+            <p className="text-3xl font-black">{teamScores[0]}</p>
+          </div>
+          <div className="hidden md:block">
+             <div className="flex gap-1">
+                {[...Array(5)].map((_, i) => <div key={i} className="w-2 h-6 bg-yellow-600 rounded-full"></div>)}
+             </div>
+          </div>
+        </div>
+
+        <div className="text-center">
+          <h1 className="text-4xl font-black italic tracking-tighter text-yellow-500 mb-1">FAMILIADA</h1>
+          <p className="text-xs text-slate-400 uppercase tracking-widest">Interactive Game System</p>
+        </div>
+
+        <div className="flex items-center gap-4 text-right">
+          <div className="hidden md:block">
+             <div className="flex gap-1 justify-end">
+                {[...Array(5)].map((_, i) => <div key={i} className="w-2 h-6 bg-blue-600 rounded-full"></div>)}
+             </div>
+          </div>
+          <div className={`p-4 rounded-xl ${activeTeam === 1 ? 'bg-blue-500 text-white shadow-[0_0_15px_rgba(59,130,246,0.5)]' : 'bg-slate-700'}`}>
+            <h2 className="text-sm font-bold uppercase tracking-widest">Drużyna B</h2>
+            <p className="text-3xl font-black">{teamScores[1]}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Game Board */}
+      <div className="w-full max-w-4xl grid grid-cols-1 md:grid-cols-12 gap-6 mb-8">
+        
+        {/* Left Side: Strikes & Info */}
+        <div className="md:col-span-3 flex flex-col gap-4">
+          <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 flex flex-col items-center justify-center min-h-[150px]">
+            <span className="text-xs text-slate-400 uppercase font-bold mb-2">Punkty w Banku</span>
+            <span className="text-5xl font-black text-yellow-500">{bank}</span>
+          </div>
+          
+          <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 flex flex-col items-center">
+             <span className="text-xs text-slate-400 uppercase font-bold mb-4">Straty (X)</span>
+             <div className="flex gap-2">
+               {[...Array(3)].map((_, i) => (
+                 <div key={i} className={`w-12 h-12 flex items-center justify-center rounded-lg border-2 transition-all duration-300 ${i < strikes ? 'bg-red-600 border-red-400 scale-110' : 'bg-slate-900 border-slate-700 opacity-30'}`}>
+                   <X size={32} strokeWidth={3} className={i < strikes ? 'text-white' : 'text-slate-600'} />
+                 </div>
+               ))}
+             </div>
+          </div>
+        </div>
+
+        {/* Main Board */}
+        <div className="md:col-span-9 bg-slate-950 border-4 border-slate-800 rounded-3xl p-6 shadow-2xl relative overflow-hidden">
+          <div className="absolute inset-0 bg-gradient-to-br from-blue-900/10 to-transparent pointer-events-none"></div>
+          
+          <div className="mb-6 text-center border-b border-slate-800 pb-4">
+            <h3 className="text-xl md:text-2xl font-bold text-slate-200 uppercase tracking-tight">
+              {gameOver ? "Gratulacje dla zwycięzców!" : currentQuestion.question}
+            </h3>
+          </div>
+
+          <div className="space-y-3">
+            {currentQuestion.answers.map((ans, idx) => (
+              <div key={idx} className="flex items-center gap-3 group">
+                <div className="flex-none w-10 h-10 bg-slate-800 rounded-lg flex items-center justify-center font-bold text-slate-400 border border-slate-700">
+                  {idx + 1}
+                </div>
+                <div className={`flex-grow h-12 rounded-lg flex items-center px-4 transition-all duration-500 transform ${revealedAnswers.includes(idx) ? 'bg-gradient-to-r from-blue-600 to-blue-500 translate-x-1' : 'bg-slate-800'}`}>
+                  {revealedAnswers.includes(idx) ? (
+                    <span className="text-lg font-bold uppercase tracking-wide animate-in fade-in slide-in-from-left-2 uppercase">{ans.text}</span>
+                  ) : (
+                    <div className="w-full h-1 bg-slate-700 rounded-full opacity-50"></div>
+                  )}
+                </div>
+                <div className={`flex-none w-14 h-12 rounded-lg flex items-center justify-center font-black text-xl transition-all duration-500 ${revealedAnswers.includes(idx) ? 'bg-yellow-500 text-slate-900 shadow-lg' : 'bg-slate-800 text-slate-600 border border-slate-700'}`}>
+                  {revealedAnswers.includes(idx) ? ans.points : '--'}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Controls */}
+      <div className="w-full max-w-2xl flex flex-col items-center gap-6">
+        <div className="flex gap-4 items-center">
+          <button 
+            onClick={toggleListening}
+            disabled={gameOver}
+            className={`w-20 h-20 rounded-full flex items-center justify-center transition-all duration-300 transform hover:scale-105 active:scale-95 shadow-2xl ${isListening ? 'bg-red-500 animate-pulse' : 'bg-yellow-500 text-slate-900'}`}
+          >
+            {isListening ? <MicOff size={32} /> : <Mic size={32} />}
+          </button>
+          
+          <div className="flex flex-col">
+            <p className={`text-lg font-medium px-6 py-2 rounded-full border border-slate-700 bg-slate-800/50 ${isListening ? 'text-red-400 border-red-500/50' : 'text-slate-300'}`}>
+              {statusMessage}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex gap-3 mt-4">
+          <button 
+            onClick={() => finalizeRound(activeTeam)}
+            className="flex items-center gap-2 px-6 py-3 bg-green-600 hover:bg-green-500 rounded-xl font-bold transition-colors"
+          >
+            <Trophy size={20} /> Przyznaj punkty ({activeTeam === 0 ? 'A' : 'B'})
+          </button>
+
+          <button 
+            onClick={resetGame}
+            className="flex items-center gap-2 px-6 py-3 bg-slate-700 hover:bg-slate-600 rounded-xl font-bold transition-colors"
+          >
+            <RotateCcw size={20} /> Reset
+          </button>
+          
+          <button 
+            onClick={() => setActiveTeam(activeTeam === 0 ? 1 : 0)}
+            className="flex items-center gap-2 px-6 py-3 bg-blue-700 hover:bg-blue-600 rounded-xl font-bold transition-colors"
+          >
+            <Users size={20} /> Zmień drużynę
+          </button>
+        </div>
+      </div>
+
+      {/* Footer / Instructions */}
+      <div className="mt-12 text-slate-500 text-sm text-center max-w-lg">
+        <p className="mb-2 italic">Aplikacja korzysta z systemowego rozpoznawania mowy. Kliknij ikonę mikrofonu i wypowiedz odpowiedź.</p>
+        <p>© 2024 Familiada Game Simulator. Wymagany dostęp do mikrofonu.</p>
+      </div>
+    </div>
+  );
+};
+
+export default App;
